@@ -10,7 +10,7 @@
 
 import { getZoneArray } from "./game/mechanics";
 import { captureSnapshot } from "./game/snapshot";
-import { CardFilter, CardDef, CardSnapshot, ComparisonOp, EvalContext, GameState, PlayerId, Condition, AmountExpression } from "./types";
+import { CardFilter, CardDef, CardSnapshot, ComparisonOp, EvalContext, GameState, PlayerId, Condition, AmountExpression, TargetExpression, CardInstanceId } from "./types";
 
 /**
  * Evaluate a filter against a card AS OF SOME INSTANT.
@@ -130,6 +130,23 @@ export function evalAmountExpression(state: GameState, evalContext: EvalContext,
         default:
             throw new Error(`Unknown AmountExpression kind: ${(expression as any).kind}`);
     }
+}
+
+export function evalTargetExpression(state: GameState, evalContext: EvalContext, expression: TargetExpression): CardInstanceId[] {
+    if (expression.kind === "SELF_TARGET") {
+        return [evalContext.source];
+    }
+    const candidates: CardInstanceId[] = [];
+    for (const playerId of Object.keys(state.playerZones)) {
+        for (const zone of expression.zones) {
+            for (const cardId of getZoneArray(state, playerId as PlayerId, zone)) {
+                if (evalCardFilter(state, evalContext, captureSnapshot(state, cardId), expression.filter ?? { kind: "ANY" })) {
+                    candidates.push(cardId);
+                }
+            }
+        }
+    }
+    return candidates;
 }
 
 /**

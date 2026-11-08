@@ -120,14 +120,19 @@ export type CardStatType =
     | "COUNTER" | "BASE_COUNTER";
 
 export type TargetExpression =
-    | { kind: "SELF_TARGET" } // Target's only self
-    | { kind: "SELECTOR_TARGET"; zones: Zone[]; filter?: CardFilter } // Affects all that meet criteria, no decision
+    |   { kind: "SELF_TARGET" } // Target's only self
+    |   { kind: "SELECTOR_TARGET"; zones: Zone[]; filter?: CardFilter } // Affects all that meet criteria, no decision
     |   { 
             kind: "PLAYER_CHOICE_TARGET";
             zones: Zone[];
             filter?: CardFilter;
-            min: AmountExpression;
+            min: AmountExpression; // minimum number of targets to select
+
+            // an amount based on the defined weight that determines the upper bound of that weight that the sum of the targets are allowed to have
+            // e.g. if the weight is POWER and the effect states that the maximum total power of the selected targets is 4000, the sum of the power of the selected targets must be less than or equal to 4000
+            // if the weight is not defined, then the capacity defaults to the max number of targets that can be selected
             capacity: AmountExpression;
+
             weight?: CardStatType;
             chooser?: "SELF" | "OPPONENT";
         }

@@ -72,12 +72,18 @@ export interface RequirementStep extends BaseStep {
     requirement: Condition;
 }
 
+const COST_OPERATIONS = [
+    "REST", "TRASH", "ADD_TO_HAND", "RETURN_DON", "LIFE_TO_HAND", "LIFE_TRASH", "LIFE_FLIP"
+]
+
+export type CostOperation = Extract<EffectOperation, { type: typeof COST_OPERATIONS[number] }>;
+
 // Payment must always be preceded by requirement
 // Payment step is a cost that must be paid to activate the effect, if it fails, the effect is aborted
 // Cost does not require a check because it should already have been checked in the requirement step
 export interface PaymentStep extends BaseStep {
     kind: "PAYMENT";
-    cost: EffectCost;
+    operation: CostOperation;
     optional: boolean; // If true, the player can choose to skip this payment step and not activate the effect
 }
 
@@ -89,20 +95,18 @@ export interface ResolutionStep extends BaseStep {
 }
 
 export type EffectOperation =
+    // Procedural game operations
     | { type: "REORDER"; from: "LOOK"; to: Zone; toPos: StackPosition }
     | { type: "LOOK"; from: Zone; fromPos?: StackPosition; amount: AmountExpression }
-    | { type: "ADD_TO_HAND"; target?: TargetExpression; reveal?: boolean }
     | { type: "DRAW"; amount: AmountExpression }
-
-// Add effect costs as we go
-export type EffectCost =
-    | { kind: "REST"; target?: TargetExpression }
-    | { kind: "TRASH"; target?: TargetExpression }
-    | { kind: "RETURN_TO_HAND"; target?: TargetExpression }
-    | { kind: "RETURN_DON"; target?: TargetExpression }
-    | { kind: "LIFE_TO_HAND"; amount: AmountExpression; lifePos: StackPosition }
-    | { kind: "LIFE_TRASH"; amount: AmountExpression; lifePos: StackPosition }
-    | { kind: "LIFE_FLIP"; amount: AmountExpression; lifePos: StackPosition; orientation: LifeOrientation }
+    // Operations that are able to be used as a cost for effect
+    | { type: "ADD_TO_HAND"; target?: TargetExpression; reveal?: boolean }
+    | { type: "REST"; target?: TargetExpression }
+    | { type: "TRASH"; target?: TargetExpression }
+    | { type: "RETURN_DON"; target?: TargetExpression }
+    | { type: "LIFE_TO_HAND"; amount: AmountExpression; lifePos: StackPosition }
+    | { type: "LIFE_TRASH"; amount: AmountExpression; lifePos: StackPosition }
+    | { type: "LIFE_FLIP"; amount: AmountExpression; lifePos: StackPosition; orientation: LifeOrientation }
 
 
 /**
