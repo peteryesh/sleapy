@@ -1,5 +1,45 @@
 # Effect system build plan
 
+## TARGETING SKELETON — status 2026-11-09 (supersedes rung 3 below where they differ)
+
+**In code (uncommitted):** singular `CHOOSE_TARGET { playerId, instanceId }` (no constraint on the
+action); `applyChooseTarget` only pushes the pick; `executeResolution` sets `EFFECT_TARGET` for a
+`PLAYER_CHOICE_TARGET`; pause guard in the stepper; `isValidSelection` (excludes picks, checks every
+limit) shared by `validate` and — via the legal-action filter — `genChooseTargets`; `TargetLimit` is a
+`CARDS` / `WEIGHTED` union (the kind names the unit — mostly answers SEL-2). Deviation from rung 3: the
+DP carries a capacity-decremented `structuredClone` of the expression rather than a derived projection;
+validate and actionGen both read it, so they agree. LITERAL capacities only for now.
+
+**To do, in order:**
+
+1. **Termination = zero candidates.** One test covers "budget spent" and "nothing on the board": if no
+   card passes `isValidSelection`, fall through to the operation on `selected`. Do NOT test "a limit hit
+   0" — under a WEIGHTED limit a weight-0 card still fits at remaining 0. Make the ceiling check
+   `weight ≤ remaining` (CARDS = weight 1); remaining can then never go negative, so a negative value
+   THROWS rather than clamping.
+2. **Reset `selected` when the step COMPLETES** (after the operation ran on it, at cursor advance) —
+   never at step entry, since `executeResolution` re-runs once per pick.
+3. **Min feasibility at PAYMENT ENTRY → `DefinitionError`.** "Rest 2 DON" with 1 restable reaching
+   the payment means the affordability gate lied. Payment-only — see 5.
+4. **Min satisfied at PAYMENT CLOSE → `DefinitionError`.** Closing on zero candidates below a floor.
+   Count-only floors can't reach this if 3 passed (no early stop exists); weighted/overlapping costs
+   can, by stranding (PAY-6) — this is the throw that catches it.
+5. **Resolution ABSORBS — 3 and 4 never apply there.** "K.O. 2" with one target K.O.s the one. A floor
+   in a resolution means "no early stop below min", not "fail if unreachable".
+6. **The affordability GATE** — "offer nothing" when a cost can't be paid (don't offer the invoke /
+   the optional-payment prompt). Derived from the payment's own `TargetExpression`, never authored;
+   blocked on the requirement-kind split (PAY-1/PAY-2).
+7. **Early stop** — TABLED. Prototype rule: the chooser picks until no candidate fits, so `min` is inert
+   in practice and "up to N" over-picks. Adds a second close path (an action + a `closed` marker that
+   `executeResolution` reads alongside zero candidates); tests written against fill-to-exhaustion will
+   need revisiting when it lands.
+
+Nits outstanding: unused `captureSnapshot` at the top of the `CHOOSE_TARGET` validate case (throws on
+an unknown id instead of returning a string); unused `isValidSelection` import in `evaluator.ts`
+(an import cycle); duplicate `ADD_TO_HAND` case in `resolution.ts`.
+
+---
+
 ## NEXT ACTIONS — 2026-11-07
 
 **Read this first. Four commits, in order. Nothing below is in progress; the working tree is docs only.**
@@ -866,6 +906,8 @@ from being removed from the board."*
   applied), *structurally impossible* (gated by Requirement, never reached), and *applied but
   neutralized by a replacement* — the new one, where partial state change stands and the effect aborts.
   Consistent with the event ruling: playing into a cost you cannot complete is legal and binding.
+  **Refined 2026-11-08 — see "Payments are all-or-nothing, and an unpayable one is a bug" below:**
+  mode two, if it IS reached, throws.
 - **A payment step completes because it WORKED, not because it RAN.** This is the defect the example
   exposes: selection and application both happen inside the payment step, so by the time a replacement
   reduces the applied set the step has already been recorded complete. Completion must be a verified
@@ -924,6 +966,53 @@ from being removed from the board."*
   the decisionPoint at pause time, and `validate`/`actionGen` read ONLY the decisionPoint. Direction is
   step→decisionPoint. Having `genChooseTargets` re-run the evaluator would be a second independent
   authoring of legality. This is what `constraint: null` is a placeholder for.
+
+## Payments are all-or-nothing, and an unpayable one is a bug (2026-11-08)
+
+- **A cost is paid in full or not at all — partial payment is ILLEGAL.** The only decline point is the
+  `PaymentStep.optional` prompt, asked once, BEFORE selection opens. Accepting commits the player to
+  the whole cost; nothing mid-selection lets them back out. The engine already enforces this —
+  `stopAllowed = accumulated >= min`, so no stop action is offered below the floor — but it is now a
+  stated rule rather than a side effect of the formula. **Retracts** an earlier claim that a player could
+  stop a cost below `min` and simply have the payment fail: that is not a legal move.
+- **Multi-part costs are owed in full.** Accept *"trash 1 card and rest 1 Character"* and you owe both.
+  PAY-3 (no `optional` after the first part) is therefore a RULE, not a convenience — declining part
+  two is illegal, not merely wasteful.
+- **Reaching a payment that cannot be paid is a DEFINITION ERROR, and the engine THROWS.** Same house
+  style as `selectSubjects` (card listens for a subject-less signal), `SUBJECT_COUNT` (no signal in
+  scope), and every unbuilt operation (*"an operation that silently does nothing is indistinguishable
+  from an effect that resolved correctly"*). Throwing is unusually safe here: the reducer is pure, so a
+  throw anywhere in an action **discards the whole action** — nothing half-applied, even mid multi-part
+  cost — and deterministic replay makes the report a perfect repro (seed + action log).
+- **How it throws:**
+  - **At payment ENTRY, before the first pick** — so the message reads "payment on <card> effect <id>
+    is infeasible" rather than failing deep inside an operation. The rollback makes a later throw safe
+    too; entry is for the diagnosis.
+  - **NOT `InvalidActionError`.** That means *the player did something illegal*, and a client will show
+    it as a rejected move. This is a broken card. Add a distinct `DefinitionError` to `errors.ts` so the
+    client and tests can tell the two apart.
+  - **Name the card and effect in the message.** The throw surfaces on whichever action *reached* the
+    payment, which may be the OPPONENT'S — their attack declaration can fail because of your
+    "on opponent's attack" effect — so the error must point at the definition, not the action.
+- **Combined, a SHORT payment is always a bug.** With a correct gate and no early stop, a payment
+  selection can only close at its floor. So in a payment, closing on `noCandidatesFit` with
+  `accumulated < min` means a gate lied → `DefinitionError`.
+- **"Airtight" should be BY CONSTRUCTION, not by discipline.** Derive the gate from the payment's own
+  `TargetExpression` (one predicate, two invocation points — see "Kill Requirement/Payment drift by
+  deletion"). Then an author cannot write a payment its gate fails to cover, and the throw becomes an
+  ENGINE assertion that only fires if the derivation itself is wrong. The static validator covers the
+  rest before runtime: PAY-1, PAY-3, PAY-4.
+- **Consequence for sequencing: weighted and overlapping-filter costs need per-pick feasibility BEFORE
+  they ship.** Feasibility is still stubbed always-true. A count-only cost cannot strand, but a weighted
+  or overlapping cost can — the player takes a card that leaves the rest unpayable — and under this
+  ruling that throws. Loud and reproducible is the right failure, but it means those cost shapes are
+  blocked on feasibility, not merely improved by it.
+- **Resolution is unaffected — it still ABSORBS.** *"K.O. 2 of your opponent's Characters"* with one on
+  the board K.O.s that one; do as much as you can. Gating a resolution on its floor would be a rules
+  bug, fizzling the part that is possible. The throw is PAYMENT-ONLY.
+- **Interception is not partial payment.** This rule governs the player's CHOICE. If the player pays in
+  full and a replacement then prevents or redirects part of it, the 2026-09-27 ruling stands: the
+  demanded operation did not happen, so the cost is unpaid and the effect fails forward.
 
 ## Replacement is a rewriting system, not a filter (2026-09-27)
 

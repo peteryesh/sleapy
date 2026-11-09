@@ -1,9 +1,9 @@
-import { GameState, GameAction, PlayerId, DecisionPoint } from "./types";
+import { GameState, GameAction, DecisionPoint } from "./types";
 import { calculateCost, calculateCounter } from "./game/calculations";
-import { CardInstanceId, EffectId } from "./types";
-import { getCardDef, getCardInstance, getZoneArray, selectQueuedEffect } from "./game/mechanics";
-import { InvalidActionError } from "./errors";
+import { CardInstanceId } from "./types";
+import { getCardInstance, getZoneArray, selectQueuedEffect } from "./game/mechanics";
 import { CHARACTERS_MAX, STAGE_MAX } from "./game/constants";
+import { evalContextOf, isValidSelection } from "./game/effects";
 
 const validActions: {[T in DecisionPoint['type']]: GameAction['type'][]} = {
     SELECT_FIRST_PLAYER: ["CHOOSE_FIRST_PLAYER"],
@@ -16,7 +16,7 @@ const validActions: {[T in DecisionPoint['type']]: GameAction['type'][]} = {
     TRIGGER: ["ACTIVATE_TRIGGER"],
     REORDER: ["SUBMIT_REORDER"],
     RESOLVE_EFFECT_ORDER: ["CHOOSE_NEXT_EFFECT"],
-    EFFECT_TARGET: ["CHOOSE_TARGETS"],
+    EFFECT_TARGET: ["CHOOSE_TARGET"],
 }
 
 function actionFitsDecision(state: GameState, action: GameAction): boolean {
@@ -196,8 +196,32 @@ export function validate(state: GameState, action: GameAction): string | null {
             if (typeof chosen === "string") return chosen;
             break;
         }
-        case "CHOOSE_TARGETS":
-            return "Not yet implemented";
+        case "CHOOSE_TARGET": {
+            // get effect eval context from the state
+            if (state.currentEffect === null) return `No current effect context to choose target for`;
+            const currentEffectStep = state.currentEffect.steps[state.currentEffect.cursor];
+            if (currentEffectStep.kind !== "PAYMENT" && currentEffectStep.kind !== "RESOLUTION") {
+                return `CHOOSE_TARGET can only be performed on effect steps with operations`;
+            }
+            if (!("target" in currentEffectStep.operation)) {
+                return `No target expression in operation`;
+            }
+            if (currentEffectStep.operation.target === null || currentEffectStep.operation.target === undefined) {
+                return `No target definition in operation`;
+            }
+            if (currentEffectStep.operation.target.kind !== "PLAYER_CHOICE_TARGET") {
+                return `Requires PLAYER_CHOICE_TARGET to choose targets`;
+            }
+            const decisionPoint = state.decisionPoint;
+            if (decisionPoint.type !== "EFFECT_TARGET") {
+                return `Requires EFFECT_TARGET decision point type`;
+            }
+            if (!isValidSelection(state, evalContextOf(state.currentEffect), decisionPoint.constraint, action.instanceId)) {
+                return `Invalid target selected for effect`;
+            }
+            
+            break;
+        }
     }
     return null;
 }

@@ -27,13 +27,16 @@ export function advanceEffect(state: GameState): GameState {
             break;
         // Real step kinds with no implementation yet. Skipping them silently
         // would make a half-built effect look like it resolved correctly.
-        case "REQUIREMENT":
         case "PAYMENT":
+        case "REQUIREMENT":
             throw new Error(`Effect step kind ${step.kind} is not yet implemented`);
         default:
             throw new Error(`Unknown effect step kind: ${(step as any).kind}`);
     }
 
+    if (state.decisionPoint) {
+        return state;
+    }
     state = advanceEffectCursor(state);
 
     // The call that runs the last step is also the call that terminates — no

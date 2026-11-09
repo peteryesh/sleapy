@@ -1,7 +1,7 @@
 import type { CardInstanceId, PlayerId, Zone, Keyword, StackPosition, CardId, LifeOrientation, Phase } from './primitives';
 import type { GameSignal, SignalCause, SignalType } from './signal';
 import type { CardSnapshot } from './card';
-import type { CardFilter, Condition, AmountExpression, TargetExpression } from './expression';
+import type { CardFilter, Condition, AmountExpression, TargetExpression, CardStatType, TargetLimit } from './expression';
 
 export type EffectId = string;
 
@@ -103,10 +103,13 @@ export type EffectOperation =
     | { type: "ADD_TO_HAND"; target?: TargetExpression; reveal?: boolean }
     | { type: "REST"; target?: TargetExpression }
     | { type: "TRASH"; target?: TargetExpression }
+    | { type: "KO"; target?: TargetExpression }
     | { type: "RETURN_DON"; target?: TargetExpression }
     | { type: "LIFE_TO_HAND"; amount: AmountExpression; lifePos: StackPosition }
     | { type: "LIFE_TRASH"; amount: AmountExpression; lifePos: StackPosition }
     | { type: "LIFE_FLIP"; amount: AmountExpression; lifePos: StackPosition; orientation: LifeOrientation }
+
+export type TargetedOperation = Extract<EffectOperation, { target?: TargetExpression }>;
 
 
 /**

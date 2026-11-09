@@ -2,7 +2,8 @@ import type { GameState } from '../../types/state';
 import type { GameAction } from '../../types/action';
 import { InvalidActionError } from '../../errors';
 import { playCard, donAttach, declareAttack, declareBlocker, playCounter, sendTriggerToHand, sendTriggerToTrash, enterWhenAttackingPhase, enterEndOfTurnPhase, enterOnOpponentAttackPhase, enterCounterPhase, enterBattleResolutionPhase, enterBlockerPhase, enterRefreshPhase, enterMainPhase, resolveBattle, enterStartOfTurnPhase, displaceCard } from '../operations';
-import { getCardInstance, getZoneArray, promoteEffect, selectQueuedEffect } from '../mechanics';
+import { getZoneArray, promoteEffect, pushSelectedTarget, selectQueuedEffect } from '../mechanics';
+
 
 // Play card from hand
 export function applyPlayCard(state: GameState, action: Extract<GameAction, { type: "PLAY_CARD" }>): GameState {
@@ -82,4 +83,10 @@ export function applyChooseNextEffect(state: GameState, action: Extract<GameActi
     if (typeof chosen === "string") throw new InvalidActionError(chosen);
     // Passes the object from the frame, not a copy — promoteEffect splices by identity.
     return promoteEffect(state, chosen);
+}
+
+export function applyChooseTarget(state: GameState, action: Extract<GameAction, { type: "CHOOSE_TARGET" }>): GameState {
+    // add target to the current effect context selected
+    state = pushSelectedTarget(state, action.instanceId);
+    return state;
 }

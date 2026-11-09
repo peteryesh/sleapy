@@ -2,7 +2,9 @@
 import { CHARACTERS_MAX, STAGE_MAX } from './game/constants';
 import { getZoneArray } from './game/mechanics';
 import { DecisionPoint, GameState, GameAction, PlayerId } from './types';
+import { evalTargetExpression } from './evaluator';
 import { validate } from './validator';
+import { evalContextOf } from './game/effects';
 
 export type ActionGenerator = (state: GameState, dp: DecisionPoint, out: GameAction[]) => void;
 
@@ -117,6 +119,15 @@ const genChooseNextEffect: ActionGenerator = (state, dp, out) => {
 
 const genChooseTargets: ActionGenerator = (state, dp, out) => {
     // find valid targets
+    if (dp.type !== "EFFECT_TARGET") return;
+    const targets = evalTargetExpression(state, evalContextOf(state.currentEffect!), dp.constraint);
+    for (const targetId of targets) {
+        out.push({
+            type: "CHOOSE_TARGET",
+            playerId: dp.player,
+            instanceId: targetId
+        });
+    }
 }
 
 const genTriggerActivation: ActionGenerator = (state, dp, out) => {

@@ -106,3 +106,18 @@ export function advanceEffectCursor(state: GameState): GameState {
         draft.currentEffect.cursor += 1;
     });
 }
+
+export function pushSelectedTarget(state: GameState, instanceId: CardInstanceId): GameState {
+    return produce(state, draft => {
+        if (!draft.currentEffect) throw new Error(`Cannot push a selected target with no current effect`);
+        if (!draft.currentEffect.selected) draft.currentEffect.selected = [];
+        draft.currentEffect.selected.push(instanceId);
+    });
+}
+
+export function clearSelectedTargets(state: GameState) {
+    return produce(state, draft => {
+        if (!draft.currentEffect) throw new Error(`No effect context to clear`);
+        draft.currentEffect.selected = null;
+    });
+}

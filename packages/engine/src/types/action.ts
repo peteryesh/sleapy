@@ -1,6 +1,5 @@
-import { DeckList } from "./card";
 import { EffectId } from "./effect";
-import { CardId, CardInstanceId, PlayerId, FrameId, Zone } from "./primitives";
+import { CardInstanceId, PlayerId } from "./primitives";
 
 export type GameAction =
     // Setup
@@ -35,4 +34,4 @@ export type GameAction =
     // The ids are kept alongside it deliberately: they make a stale index a loud
     // rejection instead of a silent wrong pick.
     | { type: "CHOOSE_NEXT_EFFECT"; playerId: PlayerId; index: number; instanceId: CardInstanceId; effectId: EffectId }
-    | { type: "CHOOSE_TARGETS"; playerId: PlayerId; instanceIds: CardInstanceId[] }
+    | { type: "CHOOSE_TARGET"; playerId: PlayerId; instanceId: CardInstanceId }

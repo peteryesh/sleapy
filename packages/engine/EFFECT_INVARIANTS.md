@@ -57,11 +57,18 @@ expressed at all. `any` locals is the trap the plan names explicitly.
 
 | id | invariant | failure mode | status |
 |---|---|---|---|
-| **PAY-1** | Every `PaymentStep` is covered by a preceding requirement | a cost the board cannot pay is offered; under the no-rewind rule the player loses whatever was already applied | blocked: requirement-kind split |
+| **PAY-1** | Every `PaymentStep` is covered by a preceding requirement | a cost the board cannot pay is reached, and the engine throws `DefinitionError` at payment entry — mid-game, possibly on the *opponent's* action. Loud and reproducible, but it blocks play, so catch it here first | blocked: requirement-kind split |
 | **PAY-2** | The affordability gate is **derived** from the payment's own `TargetExpression`, never hand-written | Requirement/Payment drift, and the double-count trap. Diverges the first time either side is edited | review |
-| **PAY-3** | In a multi-part cost, **no payment step after the first** may be `optional` | declining part 2 after part 1 has applied leaves the player having paid for nothing — there is no rewind | ready |
-| **PAY-4** | A multi-part cost's covering requirement tests the **conjunction** of all parts | the self-inflicted partial-payment case: part 1 applies, part 2 has no legal target, the card is lost to nothing | automatic under PAY-2, else review |
-| **PAY-5** | One cost part per `PaymentStep`; multi-line costs are sequential mandatory steps in card order | no `ALL` combinator — keeps `cursor` a single int | type (once `EffectCost` collapses) |
+| **PAY-3** | In a multi-part cost, **no payment step after the first** may be `optional` | offers a move the rules forbid: payment is all-or-nothing, so once a cost is accepted every part is owed and declining part 2 is **illegal**, not merely wasteful | ready |
+| **PAY-4** | A multi-part cost's covering requirement tests the **conjunction** of all parts | part 1 is payable, part 2 is not, and the gate passes anyway → `DefinitionError` when part 2 is reached. (The reducer discards the whole action, so nothing from part 1 sticks) | automatic under PAY-2, else review |
+| **PAY-5** | One cost part per `PaymentStep`; multi-line costs are sequential mandatory steps in card order | no `ALL` combinator — keeps `cursor` a single int | type (once `EffectCost` becomes the `CostOperation` subset) |
+| **PAY-6** | A payment's selection cannot **strand** — no legal pick may leave the rest of the cost unpayable | the player takes a card that makes the remainder impossible, the selection closes short, and the engine throws `DefinitionError`. Count-only floors are safe by construction; **weighted floors and overlapping-filter slots are not** | blocked: per-pick feasibility (stubbed always-true) |
+
+**Payment is all-or-nothing** (ruled 2026-11-08). The only decline point is the `optional` prompt,
+before selection opens; partial payment is not a legal move, and a payment that closes short of its
+floor means a gate lied, so the engine throws `DefinitionError` rather than failing quietly. That is
+what turns PAY-1, PAY-4 and PAY-6 from "the player loses a card" into "the game throws" — which raises
+their priority for the validator, since a thrown definition error blocks play.
 
 PAY-3 currently rests on **decline meaning `abort`**: under a flat step list, declining an optional
 payment ends the effect, which is what makes "decline part 1" correctly skip part 2 with no grouping
@@ -135,6 +142,8 @@ Nothing here is wasted effort today, but most of it cannot be *written* yet. In 
 2. **`REF` expression leaf** → unblocks DF-1, DF-2
 3. **Requirement-kind split** (authored gating vs derived affordability) → unblocks PAY-1, CTRL-2
 4. **`done`/`abort` terminals, `goto`/labels** → unblocks CTRL-1, CTRL-3, and makes DF-1 path-aware
+5. **Per-pick feasibility** (currently stubbed always-true) → unblocks PAY-6, and with it every weighted or
+   overlapping-filter COST — those throw at runtime until it exists
 
 **Writable right now, against current types:** PAY-3, ACT-1, ACT-2, SEL-1 (literal case), ZONE-1. ACT-1
 is the highest value of those — it is subtle, it is fully decidable, and its failure mode is a card that

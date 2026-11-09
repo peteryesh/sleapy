@@ -1,6 +1,8 @@
-import type { EffectContext, EffectOperation, EvalContext, GameState } from "../../types";
-import { evalAmountExpression } from "../../evaluator";
+import type { DecisionPoint, EffectContext, EffectOperation, EvalContext, GameState } from "../../types";
+import { evalAmountExpression, evalTargetExpression } from "../../evaluator";
 import { cardsDraw } from "../operations";
+import { decrementCapacity, isValidSelection, targetOf } from "./selection";
+import { clearSelectedTargets, setDecisionPoint } from "../mechanics";
 
 // Translates "whose effect is resolving" into the two things the expression
 // evaluators need: `self` answers "whose side" (CONTROLLER filters, and who acts
@@ -31,22 +33,63 @@ export function evalContextOf(effectContext: EffectContext): EvalContext {
 // expressions via `self`, so an effect that makes the opponent act says so through
 // its filters rather than through a parameter here.
 export function executeResolution(state: GameState, effectContext: EffectContext, operation: EffectOperation): GameState {
+    const targetExpression = targetOf(operation);
+    if (targetExpression?.kind === "PLAYER_CHOICE_TARGET") {
+        const newTargetExpression = structuredClone(targetExpression);
+        for (const limit of newTargetExpression.limits) {
+            if (effectContext.selected) {
+                for (const cardId of effectContext.selected) {
+                    decrementCapacity(state, cardId, limit);
+                }
+            }
+        }
+        let deciderId = effectContext.playerId;
+        if (newTargetExpression.chooser === "OPPONENT") {
+            // get first player that is not the effect context player
+            deciderId = state.config.playerIds.find(id => !(id === effectContext.playerId))!;
+        }
+        const evalContext = evalContextOf(state.currentEffect!);
+        const targets = evalTargetExpression(state, evalContext, newTargetExpression);
+        if (targets.some(target => isValidSelection(state, evalContext, newTargetExpression, target))) {
+            const dp: DecisionPoint = {
+                type: "EFFECT_TARGET",
+                player: deciderId,
+                constraint: newTargetExpression
+            }
+            return setDecisionPoint(state, dp);
+        }
+    }
+    
     const evalContext = evalContextOf(effectContext);
     switch (operation.type) {
         case "DRAW": {
             const amount = evalAmountExpression(state, evalContext, operation.amount);
             // EFFECT, not RULE — emit reads cause.sourceId to attribute wins, so
             // movement caused by an effect has to name the card that caused it.
-            return cardsDraw(state, evalContext.self, amount, { kind: "EFFECT", sourceId: effectContext.instanceId });
+            state = cardsDraw(state, evalContext.self, amount, { kind: "EFFECT", sourceId: effectContext.instanceId });
+            break;
         }
-        // Defined in the EffectOperation union but not built yet. These throw
-        // rather than fall through, because an operation that silently does
-        // nothing is indistinguishable from an effect that resolved correctly.
-        case "LOOK":
+        case "REST":
+            // differentiate the type of card being rested
+            // set state to the operation that rests cards
+            // base the cards to be rested on the target expression type
+            // read selected from the effect context if it was player choice
+            // grab from zones and target expression of selector target
+            // affect self card if self target
+            break;
         case "ADD_TO_HAND":
+        case "TRASH":
+        case "KO":
+        case "RETURN_DON":
+        case "LIFE_TO_HAND":
+        case "LIFE_TRASH":
+        case "LIFE_FLIP":
+        case "LOOK":
         case "REORDER":
             throw new Error(`Effect operation ${operation.type} is not yet implemented`);
         default:
-            throw new Error(`Unknown effect operation: ${(operation as any).type}`);
+            throw new Error(`Effect operation type not recognized`);
     }
+    state = clearSelectedTargets(state);
+    return state;
 }

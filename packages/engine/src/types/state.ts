@@ -1,21 +1,22 @@
-import type { CardInstanceId, PlayerId, Phase, BattlePhase, EndReason, FrameId, CardId, BattleRecord, MulliganChoice, Zone } from './primitives';
-import type { Card, CardDef, CardInstance } from './card';
-import type { Seed, Nonce } from '../rng/seeds';
-import { EffectId, EffectFrame, EffectDef, StatusEffectDef, EffectContext } from './effect';
+import type { CardInstanceId, PlayerId, Phase, EndReason, CardId, BattleRecord, MulliganChoice } from './primitives';
+import type { CardDef, CardInstance } from './card';
+import type { Seed } from '../rng/seeds';
+import { EffectFrame, StatusEffectDef, EffectContext } from './effect';
 import { LogEntry } from './record';
+import { TargetExpression } from './expression';
 
 export type DecisionPoint =
-    | { type: 'SELECT_FIRST_PLAYER'; player: PlayerId }
-    | { type: 'MULLIGAN'; player: PlayerId }
-    | { type: 'START_TURN'; player: PlayerId }
-    | { type: 'MAIN_ACTION'; player: PlayerId }
-    | { type: 'DISPLACE_CARD'; player: PlayerId; playedCardId: CardInstanceId }
-    | { type: 'BLOCKER_SELECTION'; player: PlayerId; battle: BattleRecord }
-    | { type: 'COUNTER_STEP'; player: PlayerId; battle: BattleRecord }
+    | { type: 'SELECT_FIRST_PLAYER'; player: PlayerId; }
+    | { type: 'MULLIGAN'; player: PlayerId; }
+    | { type: 'START_TURN'; player: PlayerId; }
+    | { type: 'MAIN_ACTION'; player: PlayerId; }
+    | { type: 'DISPLACE_CARD'; player: PlayerId; playedCardId: CardInstanceId; }
+    | { type: 'BLOCKER_SELECTION'; player: PlayerId; battle: BattleRecord; }
+    | { type: 'COUNTER_STEP'; player: PlayerId; battle: BattleRecord; }
     | { type: 'TRIGGER'; player: PlayerId; }
     | { type: 'REORDER'; player: PlayerId }
     | { type: 'RESOLVE_EFFECT_ORDER'; player: PlayerId; }
-    | { type: 'EFFECT_TARGET'; player: PlayerId; effectId: EffectId; constraint: null };
+    | { type: 'EFFECT_TARGET'; player: PlayerId; constraint: TargetExpression }
 
 // RNG Cursors
 type RngCursors = {
