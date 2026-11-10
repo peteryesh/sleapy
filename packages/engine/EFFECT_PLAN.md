@@ -1,42 +1,105 @@
 # Effect system build plan
 
-## TARGETING SKELETON — status 2026-11-09 (supersedes rung 3 below where they differ)
+## TARGETING — what's left to finish it (audited 2026-11-09, against `cda568a` + working tree)
 
-**In code (uncommitted):** singular `CHOOSE_TARGET { playerId, instanceId }` (no constraint on the
-action); `applyChooseTarget` only pushes the pick; `executeResolution` sets `EFFECT_TARGET` for a
-`PLAYER_CHOICE_TARGET`; pause guard in the stepper; `isValidSelection` (excludes picks, checks every
-limit) shared by `validate` and — via the legal-action filter — `genChooseTargets`; `TargetLimit` is a
-`CARDS` / `WEIGHTED` union (the kind names the unit — mostly answers SEL-2). Deviation from rung 3: the
-DP carries a capacity-decremented `structuredClone` of the expression rather than a derived projection;
-validate and actionGen both read it, so they agree. LITERAL capacities only for now.
+**Supersedes the 2026-11-09 "skeleton" status and rung 3 below where they differ.**
 
-**To do, in order:**
+What exists: singular `CHOOSE_TARGET { playerId, instanceId }`; `applyChooseTarget` only pushes the
+pick; `executeResolution` re-derives the remaining capacity from `selected` on every pass (a
+`structuredClone` of the expression, `decrementCapacity` per pick) and sets `EFFECT_TARGET` while any
+candidate passes `isValidSelection`; the stepper holds the cursor while a decision point is set;
+`genChooseTargets` offers every `evalTargetExpression` candidate and `getLegalActions` filters them
+through `validate`. Termination is already "zero candidates", the ceiling is already
+`weight <= remaining`, and a negative remaining already throws (old items 1 and the nits about
+`captureSnapshot`, the `evaluator.ts` cycle and the duplicate `ADD_TO_HAND` are done).
 
-1. **Termination = zero candidates.** One test covers "budget spent" and "nothing on the board": if no
-   card passes `isValidSelection`, fall through to the operation on `selected`. Do NOT test "a limit hit
-   0" — under a WEIGHTED limit a weight-0 card still fits at remaining 0. Make the ceiling check
-   `weight ≤ remaining` (CARDS = weight 1); remaining can then never go negative, so a negative value
-   THROWS rather than clamping.
-2. **Reset `selected` when the step COMPLETES** (after the operation ran on it, at cursor advance) —
-   never at step entry, since `executeResolution` re-runs once per pick.
-3. **Min feasibility at PAYMENT ENTRY → `DefinitionError`.** "Rest 2 DON" with 1 restable reaching
-   the payment means the affordability gate lied. Payment-only — see 5.
-4. **Min satisfied at PAYMENT CLOSE → `DefinitionError`.** Closing on zero candidates below a floor.
-   Count-only floors can't reach this if 3 passed (no early stop exists); weighted/overlapping costs
-   can, by stranding (PAY-6) — this is the throw that catches it.
-5. **Resolution ABSORBS — 3 and 4 never apply there.** "K.O. 2" with one target K.O.s the one. A floor
-   in a resolution means "no early stop below min", not "fail if unreachable".
-6. **The affordability GATE** — "offer nothing" when a cost can't be paid (don't offer the invoke /
-   the optional-payment prompt). Derived from the payment's own `TargetExpression`, never authored;
-   blocked on the requirement-kind split (PAY-1/PAY-2).
-7. **Early stop** — TABLED. Prototype rule: the chooser picks until no candidate fits, so `min` is inert
-   in practice and "up to N" over-picks. Adds a second close path (an action + a `closed` marker that
-   `executeResolution` reads alongside zero candidates); tests written against fill-to-exhaustion will
-   need revisiting when it lands.
+**Suite is green (305 pass / 4 todo) — but the targeting loop is not exercised by any test (see C).**
 
-Nits outstanding: unused `captureSnapshot` at the top of the `CHOOSE_TARGET` validate case (throws on
-an unknown id instead of returning a string); unused `isValidSelection` import in `evaluator.ts`
-(an import cycle); duplicate `ADD_TO_HAND` case in `resolution.ts`.
+### A. Fix the skeleton (do first — small)
+
+1. **`clearSelectedTargets` runs on the PAUSE path too.** It moved out of `executeResolution` (good —
+   that fixed the 5 `DRAW` unit tests), but into the `RESOLUTION` case, which runs *before* the
+   `if (state.decisionPoint) return` guard. So every pick that leaves candidates is wiped the moment
+   the next prompt is raised. Capacity 1 works by luck (the pick exhausts it, the op runs, then the
+   clear). Capacity ≥ 2 loops forever: each pass sees only the latest pick, capacity never drops below
+   N−1, and already-picked cards are re-offered. **Fix: clear beside `advanceEffectCursor`, after the
+   guard** — i.e. only when the step completes. That also covers `PAYMENT` for free (item 17).
+   Also drop the now-unused `clearSelectedTargets` import in `resolution.ts`.
+2. ~~`executeResolution` reads `state.currentEffect!` in the choice branch~~ — done, uses the parameter.
+3. **`REST` is an empty `break`.** A card authored with `REST` today resolves to nothing, silently,
+   and clears `selected`. Throw "not yet implemented" until the arm is real — same rule as the stepper.
+4. **`validate` throws on an unknown `instanceId`** instead of returning a string:
+   `isValidSelection` → `captureSnapshot` throws. Check the instance exists before calling it.
+5. **`isValidSelection` reads `state.currentEffect.selected`** rather than taking the picks as an
+   argument. Fine for now; becomes wrong the first time a *payment* selects while a resolution's
+   `selected` is live, or when per-pick feasibility (PAY-6) needs to ask "what if I also picked X".
+
+### B. Make targeted operations actually do something (rung 2 + rung 3 payoff)
+
+6. **One binding resolver for all three target kinds** → writes `selected` (shape decision 2):
+   `SELF_TARGET` → `[source]`, `SELECTOR_TARGET` → `evalTargetExpression`, `PLAYER_CHOICE_TARGET` →
+   the picks. The operation arms then read only `selected`, never the expression.
+7. **Decide what an omitted `target` means** on `REST`/`KO`/`TRASH`/`ADD_TO_HAND`/`RETURN_DON`
+   (`target?` is optional on all of them). Either default to `SELF_TARGET` or make it required — not
+   "whatever the arm happens to do".
+8. **Operation arms**, each grouping the binding by `getCardInstance(state, id).controller` and
+   applying per group (the operations validate ids against one player's zone):
+   - `REST` → `cardsSetRested`
+   - `KO` → `removeCardsFromField(..., K.O., ...)` — **lands with the On-K.O. `activeZone: TRASH`
+     change and the `_removeCardFromField` emit reorder** (CLAUDE.md: silent staging otherwise)
+   - `TRASH` → `_cardsMoveToTrash` from the card's *own* zone (hand vs field differ; field must go
+     through `removeCardsFromField` with method TRASH, not a raw move)
+   - `ADD_TO_HAND`, `RETURN_DON` — after the three above
+   - **Empty binding = no-op, skip the call.** `removeCardsFromField` throws on `[]`, and "K.O. 1"
+     against an empty board must fizzle, not crash.
+9. **Return `{ state, outcome }`** from the new arms (shape decision 1) so `PriorActionResolved` /
+   `bind` have something to read later. Don't retrofit `cardsDraw`.
+10. **Author real cards in `src/cards/`**: one SELECTOR ("rest all opponent Characters"), one CHOICE
+    ("K.O. up to 1 opponent Character with cost 3 or less"), tested through `reducer` against the
+    registry.
+
+### C. Tests — none exist for targeting yet
+
+11. In priority order:
+    - **The hang invariant**: the driver always either sets a DP or completes the step. Write this
+      first; it is the one failure that produces no error.
+    - zero candidates → no prompt, step completes, effect fizzles
+    - one pick → prompted, picked card is affected, `selected` is `null` afterwards
+    - **multi-pick (`CARDS` capacity 2) → two prompts, already-picked card not re-offered, and
+      `selected` holds BOTH picks while the second prompt is open** — this is the test that catches A1
+    - `WEIGHTED` → offered set narrows as remaining drops; weight-0 card still offered at remaining 0
+    - `chooser: "OPPONENT"` → DP goes to the opponent; the controller's `CHOOSE_TARGET` is rejected
+    - `validate` rejects: wrong player, off-filter card, wrong zone, already picked, unknown id
+    - `getLegalActions` at `EFFECT_TARGET` ≡ the set `validate` accepts
+    - the clone: `state.definitions` / the step's expression capacity is unchanged after a pick
+
+### D. Payment-side selection (blocked on the `PAYMENT` stepper arm)
+
+12. **Min feasible at payment ENTRY → `DefinitionError`** (old item 3). Payment only.
+13. **Min satisfied at payment CLOSE → `DefinitionError`** (old item 4) — catches PAY-6 stranding.
+14. **Resolution absorbs** (old item 5): neither check runs for a `RESOLUTION` step. `CARDS.min` is
+    therefore read *only* by payments — note it on the type.
+15. **Affordability gate** (old item 6) derived from the payment's own `TargetExpression`
+    (PAY-2). Blocked on the requirement-kind split (PAY-1).
+16. **Per-pick feasibility** (PAY-6) — a pick that strands the rest of a weighted/overlapping cost
+    must not be offered. Currently stubbed always-true.
+17. The validator already accepts `CHOOSE_TARGET` on a `PAYMENT` step; nothing can reach it yet.
+    Clearing at cursor advance (A1) covers the payment path too.
+
+### E. Later / tabled
+
+18. **Early stop** (rung 5, "up to N") — TABLED. Needs a stop action + a `closed` marker that
+    `executeResolution` reads alongside zero candidates; fill-to-exhaustion tests will need revisiting.
+    Until then `min` is inert and "up to N" over-picks.
+19. **Non-`LITERAL` capacities** — `decrementCapacity` throws on anything else. Needs the capacity
+    *evaluated once* at step entry (frozen) and then decremented, or "K.O. up to X where X = DON" moves
+    under the player mid-selection.
+20. **"Cannot be chosen" protection** — a targeting-only exclusion, distinct from "cannot be K.O.'d"
+    (see Targeting → two kinds of protection). Goes in `isValidSelection`, not the filter.
+21. **Cross-step bindings** (`bind` / `REF`, `PriorActionResolved`, 28 cards) — `selected` is wiped at
+    step completion, so "K.O. 1. If you do, draw 1" needs the outcome bound into `locals`.
+22. **Web client** — `apps/sleapy-web` has no handling for `EFFECT_TARGET` / `CHOOSE_TARGET`; a game
+    reaching one in the UI is stuck.
 
 ---
 

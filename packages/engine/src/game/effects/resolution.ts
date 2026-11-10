@@ -48,7 +48,7 @@ export function executeResolution(state: GameState, effectContext: EffectContext
             // get first player that is not the effect context player
             deciderId = state.config.playerIds.find(id => !(id === effectContext.playerId))!;
         }
-        const evalContext = evalContextOf(state.currentEffect!);
+        const evalContext = evalContextOf(effectContext);
         const targets = evalTargetExpression(state, evalContext, newTargetExpression);
         if (targets.some(target => isValidSelection(state, evalContext, newTargetExpression, target))) {
             const dp: DecisionPoint = {
@@ -90,6 +90,5 @@ export function executeResolution(state: GameState, effectContext: EffectContext
         default:
             throw new Error(`Effect operation type not recognized`);
     }
-    state = clearSelectedTargets(state);
     return state;
 }

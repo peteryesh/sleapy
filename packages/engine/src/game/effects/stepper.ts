@@ -1,5 +1,5 @@
 import type { GameState } from "../../types";
-import { advanceEffectCursor, clearCurrentEffect } from "../mechanics";
+import { advanceEffectCursor, clearCurrentEffect, clearSelectedTargets } from "../mechanics";
 import { executeResolution } from "./resolution";
 
 // The program counter for a promoted effect. Runs the step at the cursor, moves
@@ -38,6 +38,7 @@ export function advanceEffect(state: GameState): GameState {
         return state;
     }
     state = advanceEffectCursor(state);
+    state = clearSelectedTargets(state);
 
     // The call that runs the last step is also the call that terminates — no
     // extra round trip through the conductor just to notice the list ran out.

@@ -242,7 +242,7 @@ function _removeCardFromField(state: GameState, playerId: PlayerId, instanceId: 
 }
 
 export function removeCardsFromField(state: GameState, playerId: PlayerId, instanceIds: CardInstanceId[], method: RemovalMethod, position: StackPosition, signalCause: SignalCause): GameState {
-    if (instanceIds.length === 0) throw new InvalidActionError(`No removal targets provided`);
+    if (instanceIds.length === 0) return state;
     
     for (const id of instanceIds) {
         state = _removeCardFromField(state, playerId, id, method, position, signalCause);
