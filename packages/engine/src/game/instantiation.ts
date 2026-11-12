@@ -90,7 +90,6 @@ export function createInstance(instanceId: CardInstanceId, cardClass: CardClass,
                 cardId: cardDef!.id,
                 class: "LEADER",
                 attachedDon: [],
-                effectsUsedThisTurn: {}
             } as LeaderInstance;
         case "CHARACTER":
             return {
@@ -99,7 +98,6 @@ export function createInstance(instanceId: CardInstanceId, cardClass: CardClass,
                 class: "CHARACTER",
                 attachedDon: [],
                 playedOnTurns: [],
-                effectsUsedThisTurn: {},
                 flipped: false
             } as CharacterInstance;
         case "STAGE":
@@ -109,7 +107,6 @@ export function createInstance(instanceId: CardInstanceId, cardClass: CardClass,
                 class: "STAGE",
                 attachedDon: [],
                 playedOnTurns: [],
-                effectsUsedThisTurn: {},
                 flipped: false
             } as StageInstance;
         case "EVENT":
@@ -118,7 +115,6 @@ export function createInstance(instanceId: CardInstanceId, cardClass: CardClass,
                 cardId: cardDef!.id,
                 class: "EVENT",
                 playedOnTurns: [],
-                effectsUsedThisTurn: {},
                 flipped: false
             } as EventInstance;
         case "DON":

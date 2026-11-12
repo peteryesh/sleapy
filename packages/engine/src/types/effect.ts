@@ -33,6 +33,16 @@ export type EffectDef = {
 export type EffectContext = {
     condition?: Condition;
     steps: EffectStep[];
+    /**
+     * Copied from the definition at staging, like `condition` and `steps`. Read when
+     * the effect consumes its use; the pre-activation gates (emitter, validate) read
+     * the definition instead, since no context exists yet. The definition is immutable
+     * for the game, so the two cannot disagree.
+     *
+     * REQUIRED rather than optional, so that "not once per turn" is always a stated
+     * value and never an omission.
+     */
+    oncePerTurn: boolean;
     playerId: PlayerId;
     effectId: EffectId;
     instanceId: CardInstanceId;

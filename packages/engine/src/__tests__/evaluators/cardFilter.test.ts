@@ -19,6 +19,7 @@ import {
     makeEventInstance,
     makeStageInstance,
     resetIds,
+    zonesFromInstances,
 } from "../helpers";
 
 const SELF: PlayerId = "p1";
@@ -48,7 +49,7 @@ function buildState(instances: CardInstance[], defs: Record<string, Partial<Card
             ...partial,
         };
     }
-    return createTestState([SELF, OPP], instanceMap, {}, definitions);
+    return createTestState([SELF, OPP], instanceMap, zonesFromInstances(instances), definitions);
 }
 
 // A character instance with arbitrary field overrides (flipped, isRested, controller, zone, ...).

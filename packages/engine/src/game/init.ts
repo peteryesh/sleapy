@@ -69,6 +69,7 @@ export function createEmptyGameState(config: GameConfig): GameState {
         turnPlayerId: coinFlipWinner,
         phase: "SETUP",
         cardsPlayedThisTurn: [],
+        effectsUsedThisTurn: [],
 
         currentBattle: null,
         battlesThisTurn: [],

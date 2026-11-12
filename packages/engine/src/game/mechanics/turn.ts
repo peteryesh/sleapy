@@ -1,7 +1,6 @@
 import { produce } from 'immer';
 import { GameState } from '../../types/state';
 import { MulliganChoice, Phase, PlayerId } from '../../types';
-import { getCardInstance } from './helpers';
 
 // "PENDING" | "KEEP" | "MULLIGAN"
 export function setMulliganChoice(state: GameState, playerId: PlayerId, mulliganChoice: MulliganChoice) {
@@ -50,12 +49,7 @@ export function resetCardsPlayedThisTurn(state: GameState): GameState {
 
 export function resetEffectsUsedThisTurn(state: GameState): GameState {
     return produce(state, draft => {
-        for (const instanceId in draft.instances) {
-            const instance = getCardInstance(draft, instanceId);
-            if (instance.class !== "DON" && instance.effectsUsedThisTurn) {
-                instance.effectsUsedThisTurn = {};
-            }
-        }
+        draft.effectsUsedThisTurn = [];
     });
 }
 

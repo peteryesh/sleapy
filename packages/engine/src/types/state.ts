@@ -2,8 +2,12 @@ import type { CardInstanceId, PlayerId, Phase, EndReason, CardId, BattleRecord, 
 import type { CardDef, CardInstance } from './card';
 import type { Seed } from '../rng/seeds';
 import { EffectFrame, StatusEffectDef, EffectContext } from './effect';
+import type { EffectId } from './effect';
 import { LogEntry } from './record';
 import { TargetExpression } from './expression';
+
+// One consumed [Once Per Turn] use: this effect, on this card instance.
+export type UsedEffect = { instanceId: CardInstanceId; effectId: EffectId };
 
 export type DecisionPoint =
     | { type: 'SELECT_FIRST_PLAYER'; player: PlayerId; }
@@ -82,6 +86,11 @@ export interface GameState {
 
     // Turn Tracking
     cardsPlayedThisTurn: CardInstanceId[]; // used for tracking same-turn played effects and eligible attackers
+    // Effects used this turn, UNIQUE per (instanceId, effectId) — markEffectUsed is
+    // idempotent. If an effect ever needs "used N times this turn", add a count to
+    // UsedEffect rather than allowing duplicates. Pairs, not a string key, so ids are
+    // never encoded/parsed.
+    effectsUsedThisTurn: UsedEffect[];
     battlesThisTurn: BattleRecord[]; // used for tracking multiple attacks with the same character and same-turn attack effects
     
     currentBattle: BattleRecord | null;

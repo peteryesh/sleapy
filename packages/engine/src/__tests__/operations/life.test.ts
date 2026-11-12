@@ -47,9 +47,10 @@ describe("_cardsMoveToLife", () => {
         assertValidGameState(next);
     });
     it("attempts to move id to life when id does not exist in source", () => {
-        const c1 = makeCharacterInstance({ controller: "p1" });
+        // Validly in HAND, so a move whose source is DECK finds nothing there.
+        const c1 = makeCharacterInstance({ controller: "p1", currentZone: "HAND" });
         state = createTestState(["p1", "p2"], { [c1.instanceId]: c1 }, {
-            p1: { deck: [] },
+            p1: { hand: [c1.instanceId] },
         });
 
         expect(() => _cardsMoveToLife(state, "p1", [c1.instanceId], "DECK", "TOP", { kind: "RULE" }))

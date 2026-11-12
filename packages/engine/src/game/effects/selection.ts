@@ -74,8 +74,6 @@ export function getStatFromLimitWeight(target: CardSnapshot, weight: CardStatTyp
 }
 
 export function decrementCapacity(state: GameState, targetId: CardInstanceId, limit: TargetLimit): TargetLimit {
-    // need to handle the case of negative values, which is possible
-    // it is also possible this is handled by default, need to check the ruling on negative values
     if (limit.capacity.kind !== "LITERAL") {
         throw Error(`Only literals allowed on effect target defintions for now`);
     }

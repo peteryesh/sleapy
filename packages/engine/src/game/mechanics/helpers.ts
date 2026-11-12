@@ -43,3 +43,10 @@ export function getCardDef(state: GameState, instanceId: CardInstanceId): CardDe
     if (!cardDef) throw new Error(`Card definition for instance ${instanceId} not found`);
     return cardDef;
 }
+
+export function getPlayersInTurnOrder(state: GameState): PlayerId[] {
+    const ids = state.config.playerIds;
+    const start = ids.indexOf(state.turnPlayerId);
+    if (start === -1) throw new Error(`Turn player ${state.turnPlayerId} not in playerIds`);
+    return [...ids.slice(start), ...ids.slice(0, start)];
+}

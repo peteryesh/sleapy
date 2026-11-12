@@ -3,6 +3,8 @@ import { produce } from "immer";
 import { captureSnapshot } from "../../game/snapshot";
 import { playCharacter, removeCardsFromField } from "../../game/operations/cards";
 import { calculatePower } from "../../game/calculations";
+import { attachDon } from "../../game/mechanics";
+import { assertValidGameState } from "../invariants";
 import {
     createTestState,
     makeCharacterInstance,
@@ -42,6 +44,16 @@ function stateWith(instances: CardInstance[], defs: Record<string, Partial<CardD
     for (const inst of instances) {
         state = placeCard(state, inst, inst.currentZone ?? "DECK", inst.controller);
     }
+    assertValidGameState(state);
+    return state;
+}
+
+// Attach through the real mechanic rather than by hand, so both sides of the link
+// (the card's attachedDon, the DON's attachedTo and its null zone) stay consistent.
+// Setup, not code under test — the DON is placed in DON_ACTIVE first, then lifted out.
+function withAttachedDon(state: GameState, donId: string, targetId: string): GameState {
+    state = attachDon(state, donId, targetId);
+    assertValidGameState(state);
     return state;
 }
 
@@ -92,10 +104,8 @@ describe("captureSnapshot", () => {
         const c = makeCharacterInstance({ cardId: "OP01-001", currentZone: "CHARACTERS" });
         const don = makeDonInstance({ currentZone: "DON_ACTIVE" });
         let state = stateWith([c, don], { "OP01-001": { power: 5000, cost: 4 } });
-        state = produce(state, draft => {
-            (draft.instances[c.instanceId] as any).attachedDon = [don.instanceId];
-            draft.turnPlayerId = SELF;
-        });
+        state = withAttachedDon(state, don.instanceId, c.instanceId);
+        state = produce(state, draft => { draft.turnPlayerId = SELF; });
 
         const snap = captureSnapshot(state, c.instanceId);
 
@@ -108,9 +118,7 @@ describe("captureSnapshot", () => {
         const c = makeCharacterInstance({ cardId: "OP01-001", currentZone: "CHARACTERS" });
         const don = makeDonInstance({ currentZone: "DON_ACTIVE" });
         let state = stateWith([c, don], { "OP01-001": { power: 5000, cost: 4 } });
-        state = produce(state, draft => {
-            (draft.instances[c.instanceId] as any).attachedDon = [don.instanceId];
-        });
+        state = withAttachedDon(state, don.instanceId, c.instanceId);
 
         const snap = captureSnapshot(state, c.instanceId);
 
@@ -129,15 +137,8 @@ describe("last-known information", () => {
         const c = makeCharacterInstance({ cardId: "OP01-001", currentZone: "CHARACTERS" });
         const don = makeDonInstance({ currentZone: "DON_ACTIVE" });
         let state = stateWith([c, don], { "OP01-001": { power: 5000, cost: 4 } });
-        state = produce(state, draft => {
-            (draft.instances[c.instanceId] as any).attachedDon = [don.instanceId];
-            // An attached DON sits in no zone — detachDon asserts on that when it
-            // sends the card back to the DON area.
-            (draft.instances[don.instanceId] as any).attachedTo = c.instanceId;
-            draft.instances[don.instanceId].currentZone = null;
-            draft.playerZones[SELF].donActive = [];
-            draft.turnPlayerId = SELF;
-        });
+        state = withAttachedDon(state, don.instanceId, c.instanceId);
+        state = produce(state, draft => { draft.turnPlayerId = SELF; });
 
         expect(calculatePower(state, c.instanceId)).toBe(5001);
 
@@ -180,16 +181,20 @@ describe("last-known information", () => {
     // On-Play effects are unaffected because the activeZone gate reads the LISTENER's
     // live zone, never the subject's captured one.
     it("captures a played character in the zone it came from, not the one it lands in", () => {
-        const leader = makeLeaderInstance({ controller: SELF, currentZone: "LEADER" });
+        const leader = makeLeaderInstance({ controller: SELF, cardId: "OP01-LEADER" });
         const c = makeCharacterInstance({ cardId: "OP01-001", currentZone: "HAND" });
-        let state = stateWith([leader, c], { "OP01-001": { power: 5000, cost: 0 } });
+        let state = stateWith([leader, c], {
+            "OP01-001": { power: 5000, cost: 0 },
+            "OP01-LEADER": { class: "LEADER", power: 5000 },
+        });
         state = produce(state, draft => { draft.turnPlayerId = SELF; });
 
         const after = playCharacter(state, SELF, c.instanceId, { kind: "PLAYER" });
 
         const played = after.gameLog.find(
-            (entry: any) => entry.kind === "SIGNAL" && entry.signal.type === "CHARACTER_PLAYED",
+            entry => entry.kind === "SIGNAL" && entry.signal.type === "CHARACTER_PLAYED",
         );
+        expect(played).toBeDefined();
         expect((played as any).signal.subjects[0].zoneAtCapture).toBe("HAND");
         // ...while the card itself has landed.
         expect(after.instances[c.instanceId].currentZone).toBe("CHARACTERS");

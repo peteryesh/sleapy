@@ -34,9 +34,10 @@ describe("_cardsMoveToHand", () => {
         assertValidGameState(next);
     });
     it("attempts to move id to hand when id does not exist in source", () => {
-        const c1 = makeCharacterInstance({ controller: "p1" });
+        // Validly in TRASH, so a move whose source is DECK finds nothing there.
+        const c1 = makeCharacterInstance({ controller: "p1", currentZone: "TRASH" });
         state = createTestState(["p1", "p2"], { [c1.instanceId]: c1 }, {
-            p1: { deck: [] },
+            p1: { trash: [c1.instanceId] },
         });
 
         // throws if id not in source zone

@@ -34,9 +34,10 @@ describe("_cardsMoveToTrash", () => {
         assertValidGameState(next);
     });
     it("attempts to move id to trash when id does not exist in source", () => {
-        const c1 = makeCharacterInstance({ controller: "p1", currentZone: "HAND" });
+        // Validly in DECK, so a move whose source is HAND finds nothing there.
+        const c1 = makeCharacterInstance({ controller: "p1", currentZone: "DECK" });
         state = createTestState(["p1", "p2"], { [c1.instanceId]: c1 }, {
-            p1: { hand: [] },
+            p1: { deck: [c1.instanceId] },
         });
 
         expect(() => _cardsMoveToTrash(state, "p1", [c1.instanceId], "HAND", { kind: "RULE" }))

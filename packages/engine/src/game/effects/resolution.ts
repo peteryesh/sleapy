@@ -1,8 +1,8 @@
-import type { DecisionPoint, EffectContext, EffectOperation, EvalContext, GameState } from "../../types";
+import type { CardInstanceId, DecisionPoint, EffectContext, EffectOperation, EvalContext, GameState, PlayerId, TargetExpression } from "../../types";
 import { evalAmountExpression, evalTargetExpression } from "../../evaluator";
 import { cardsDraw } from "../operations";
 import { decrementCapacity, isValidSelection, targetOf } from "./selection";
-import { clearSelectedTargets, setDecisionPoint } from "../mechanics";
+import { clearSelectedTargets, getCardInstance, setDecisionPoint, getPlayersInTurnOrder, getCardDef, markEffectUsed, removeQueuedEffects } from "../mechanics";
 
 // Translates "whose effect is resolving" into the two things the expression
 // evaluators need: `self` answers "whose side" (CONTROLLER filters, and who acts
@@ -59,7 +59,13 @@ export function executeResolution(state: GameState, effectContext: EffectContext
             return setDecisionPoint(state, dp);
         }
     }
-    
+    // mark this effect as used this turn for this player
+    // if "once per turn" then check for all instances queued and remove them
+    state = consumeEffect(state, effectContext);
+    return executeOperation(state, effectContext, operation);
+}
+
+export function executeOperation(state: GameState, effectContext: EffectContext, operation: EffectOperation): GameState {
     const evalContext = evalContextOf(effectContext);
     switch (operation.type) {
         case "DRAW": {
@@ -91,4 +97,40 @@ export function executeResolution(state: GameState, effectContext: EffectContext
             throw new Error(`Effect operation type not recognized`);
     }
     return state;
+}
+
+export function resolveTargets(state: GameState, effectContext: EffectContext, target: TargetExpression): CardInstanceId[] {
+    switch(target.kind) {
+        case "SELF_TARGET":
+            return [effectContext.instanceId];
+        case "SELECTOR_TARGET":
+            return evalTargetExpression(state, evalContextOf(effectContext), target);
+        case "PLAYER_CHOICE_TARGET":
+            return effectContext.selected ?? [];
+    }
+}
+
+export type PlayerTargetGroup = {
+    playerId: PlayerId;
+    targets: CardInstanceId[];
+};
+
+export function groupAndOrderTargetsByPlayer(state: GameState, targets: CardInstanceId[]): PlayerTargetGroup[] {
+    const grouped = Object.fromEntries(
+        state.config.playerIds.map(p => [p, [] as CardInstanceId[]])
+    ) as Record<PlayerId, CardInstanceId[]>;
+
+    for (const targetId of targets) {
+        grouped[getCardInstance(state, targetId).controller].push(targetId);
+    }
+
+    return getPlayersInTurnOrder(state)
+        .map(p => ({ playerId: p, targets: grouped[p] }))
+        .filter(group => group.targets.length > 0);
+}
+
+export function consumeEffect(state: GameState, effectContext: EffectContext): GameState {
+    if(!effectContext.oncePerTurn) return state;
+    state = markEffectUsed(state, effectContext.instanceId, effectContext.effectId);
+    return removeQueuedEffects(state, effectContext.instanceId, effectContext.effectId);
 }

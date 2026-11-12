@@ -1,13 +1,14 @@
 import { produce } from "immer";
-import { CardInstanceId, CardSnapshot, EffectContext, EffectId, GameState, PlayerId } from "../../types";
-import { getCardDef } from "./helpers";
+import { CardInstanceId, CardSnapshot, EffectContext, EffectId, GameState, PlayerId, UsedEffect } from "../../types";
+import { getCardDef, getCardInstance } from "./helpers";
 
 // Builds the effect in its FINAL shape at staging. There is no lighter intermediate
 // form to promote from later — see the note on EffectContext for why the reference
 // split was removed.
 //
-// `steps` and `condition` are references into the card definition, which is immutable
-// for the life of the game, so this allocates a small object and nothing more.
+// `steps`, `condition` and `oncePerTurn` are read straight off the card definition,
+// which is immutable for the life of the game, so this allocates a small object and
+// nothing more.
 //
 // `subjects` arrives already filtered by the activation's SubjectMatch and is stored
 // verbatim. Storing it here rather than re-deriving it at resolution is the point: by
@@ -24,6 +25,7 @@ export function stageEffect(state: GameState, playerId: PlayerId, instanceId: Ca
         instanceId: instanceId,
         condition: effectDef.condition,
         steps: effectDef.steps,
+        oncePerTurn: effectDef.oncePerTurn,
         subjects: subjects,
         cursor: 0,
         selected: null,
@@ -121,3 +123,32 @@ export function clearSelectedTargets(state: GameState) {
         draft.currentEffect.selected = null;
     });
 }
+
+export function isEffectUsedThisTurn(state: GameState, instanceId: CardInstanceId, effectId: EffectId): boolean {
+    return state.effectsUsedThisTurn.some(used => used.instanceId === instanceId && used.effectId === effectId);
+}
+
+// Idempotent: entries are unique per (instanceId, effectId), so marking an effect that
+// is already used returns the same state. That also makes it safe to call once per
+// RESOLUTION step — only the first call records anything.
+export function markEffectUsed(state: GameState, instanceId: CardInstanceId, effectId: EffectId): GameState {
+    if (isEffectUsedThisTurn(state, instanceId, effectId)) return state;
+    return produce(state, draft => {
+        draft.effectsUsedThisTurn.push({instanceId: instanceId, effectId: effectId} as UsedEffect);
+    });
+}
+
+export function removeQueuedEffects(state: GameState, instanceId: CardInstanceId, effectId: EffectId): GameState {
+    return produce(state, draft => {
+        for (const frame of [...draft.effectQueue, draft.stagingFrame]) {
+            for (const playerId of Object.keys(frame)) {
+                if(frame[playerId].some(ctx => isSameEffect(ctx, instanceId, effectId))) {
+                    frame[playerId] = frame[playerId].filter(ctx => !isSameEffect(ctx, instanceId, effectId));
+                }
+            }
+        }
+    });
+}
+
+const isSameEffect = (ctx: EffectContext, instanceId: CardInstanceId, effectId: EffectId) =>
+    ctx.instanceId === instanceId && ctx.effectId === effectId;

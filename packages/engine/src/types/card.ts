@@ -59,7 +59,6 @@ export interface LeaderInstance extends BaseCardInstance {
     cardId: CardId;
     class: "LEADER";
     attachedDon: CardInstanceId[];
-    effectsUsedThisTurn: Record<EffectId, boolean>;
 }
 
 // Character — can attack, have DON!! attached, use effects
@@ -68,7 +67,6 @@ export interface CharacterInstance extends BaseCardInstance {
     class: "CHARACTER";
     attachedDon: CardInstanceId[];
     playedOnTurns: number[];
-    effectsUsedThisTurn: Record<EffectId, boolean>;
     flipped: boolean;
 }
 
@@ -78,7 +76,6 @@ export interface StageInstance extends BaseCardInstance {
     class: "STAGE";
     attachedDon: CardInstanceId[];
     playedOnTurns: number[];
-    effectsUsedThisTurn: Record<EffectId, boolean>;
     flipped: boolean;
 }
 
@@ -86,7 +83,6 @@ export interface EventInstance extends BaseCardInstance {
     cardId: CardId;
     class: "EVENT";
     playedOnTurns: number[];
-    effectsUsedThisTurn: Record<EffectId, boolean>;
     flipped: boolean;
 }
 

@@ -3,6 +3,7 @@ import type { GameState, PlayerZones } from "../types/state";
 import type { CardInstance, CardDef } from "../types/card";
 import type { CardId, CardInstanceId, PlayerId, Zone } from "../types/primitives";
 import type { EffectContext, EffectDef, EffectId, EffectStep } from "../types/effect";
+import type { CardFilter, CardStatType, EvalContext, TargetExpression, TargetLimit } from "../types/expression";
 import { getZoneArray } from "../game/mechanics/helpers";
 import { assertValidGameState } from "./invariants";
 
@@ -23,6 +24,12 @@ function emptyZones(): PlayerZones {
     };
 }
 
+// The empty world, filled with exactly what the caller passes. CHECKS THE STATE
+// INVARIANTS before returning: `instances` and `zoneOverrides` are separate inputs that
+// must agree, and a test passing on a board the engine could never produce proves
+// nothing. Pass zonesFromInstances(...) as `zoneOverrides` when the instances already
+// say where they are. To test behavior against a missing card, put the card validly in
+// a DIFFERENT zone rather than building a contradictory one.
 export function createTestState(
     players: PlayerId[] = ["p1", "p2"],
     instances: Record<CardInstanceId, CardInstance> = {},
@@ -51,7 +58,7 @@ export function createTestState(
         }
     }
 
-    return {
+    const state: GameState = {
         version: 0,
         config: {
             gameId: "test",
@@ -78,6 +85,7 @@ export function createTestState(
         turnPlayerId: players[0],
         phase: "MAIN",
         cardsPlayedThisTurn: [],
+        effectsUsedThisTurn: [],
         currentBattle: null,
         battlesThisTurn: [],
         decisionPoint: null,
@@ -89,6 +97,29 @@ export function createTestState(
         winner: null,
         endReason: null,
     };
+    assertValidGameState(state);
+    return state;
+}
+
+const ZONE_KEYS: Record<Zone, keyof PlayerZones> = {
+    CHARACTERS: "characters", DECK: "deck", DON_ACTIVE: "donActive", DON_DECK: "donDeck",
+    DON_RESTED: "donRested", HAND: "hand", LEADER: "leader", LIFE: "life", LOOK: "look",
+    STAGE: "stage", TRASH: "trash", TRIGGER: "trigger",
+};
+
+// Zone arrays derived from each instance's own controller + currentZone, in the order
+// given — so instances that already say where they are cannot disagree with the zones.
+// Instances with no currentZone (DON attached to a card) are left out, as in a real game.
+export function zonesFromInstances(
+    instances: Record<CardInstanceId, CardInstance> | CardInstance[],
+): Partial<Record<PlayerId, Partial<PlayerZones>>> {
+    const zones: Partial<Record<PlayerId, Partial<PlayerZones>>> = {};
+    for (const instance of Array.isArray(instances) ? instances : Object.values(instances)) {
+        if (instance.currentZone === null) continue;
+        const playerZones = (zones[instance.controller] ??= {});
+        (playerZones[ZONE_KEYS[instance.currentZone]] ??= []).push(instance.instanceId);
+    }
+    return zones;
 }
 
 let _nextId = 1;
@@ -107,7 +138,6 @@ export function makeCharacterInstance(
         isRested: false,
         attachedDon: [],
         playedOnTurns: [],
-        effectsUsedThisTurn: {},
         flipped: false,
     };
 }
@@ -141,7 +171,6 @@ export function makeStageInstance(
         isRested: false,
         attachedDon: [],
         playedOnTurns: [],
-        effectsUsedThisTurn: {},
         flipped: false,
     };
 }
@@ -158,7 +187,6 @@ export function makeEventInstance(
         currentZone: overrides.currentZone ?? "DECK",
         isRested: false,
         playedOnTurns: [],
-        effectsUsedThisTurn: {},
         flipped: false,
     };
 }
@@ -175,7 +203,6 @@ export function makeLeaderInstance(
         currentZone: "LEADER",
         isRested: false,
         attachedDon: [],
-        effectsUsedThisTurn: {},
     };
 }
 
@@ -364,6 +391,180 @@ export function makeEffectContext(overrides: Partial<EffectContext> = {}): Effec
         selected: null,
         locals: {},
         steps: [],
+        // Override to test consumption directly. A test that also goes through the
+        // emitter gate should set the flag on the definition (withEffect) instead, so
+        // the context and the definition agree.
+        oncePerTurn: false,
         ...overrides,
     };
 }
+
+// ---------------------------------------------------------------------------
+// Targeting fixtures
+// ---------------------------------------------------------------------------
+//
+// Shared by evaluators/targetExpression.test.ts (candidates and predicates) and
+// effects/target.test.ts (the prompt loop). Built on createTestState + placeCard, so
+// the board is the empty world filled with exactly what the test lists.
+
+// A character def with real stats. createTestState's auto-generated defs carry no
+// cost, power or counter, so captureSnapshot reports them as null — and a null stat
+// throws inside getStatFromLimitWeight for any WEIGHTED limit.
+export function makeCharacterDef(id: CardId, stats: Partial<CardDef> = {}): CardDef {
+    return {
+        id,
+        name: id,
+        class: "CHARACTER",
+        cost: 0,
+        power: 1000,
+        counter: 1000,
+        colors: [],
+        types: [],
+        attributes: [],
+        aliases: [],
+        restrictions: [],
+        ...stats,
+    };
+}
+
+// The stat ladder. Use NO_COUNTER when the null-stat throw is the thing under test,
+// and the others everywhere else.
+export const STAT_CARD = {
+    SOURCE: "TEST-SOURCE",
+    ZERO: "TEST-ZERO",        // cost 0 / power 0: weighs nothing against a WEIGHTED limit
+    LOW: "TEST-LOW",          // cost 1 / power 1000
+    MID: "TEST-MID",          // cost 3 / power 3000
+    HIGH: "TEST-HIGH",        // cost 5 / power 5000
+    NEGATIVE: "TEST-NEG",     // power -1000 — see note on the def
+    NO_COUNTER: "TEST-NOCTR", // counter absent: snapshot.counter is null
+} as const;
+
+export const STAT_DEFINITIONS: Record<CardId, CardDef> = {
+    [STAT_CARD.SOURCE]: makeCharacterDef(STAT_CARD.SOURCE),
+    [STAT_CARD.ZERO]: makeCharacterDef(STAT_CARD.ZERO, { cost: 0, power: 0 }),
+    [STAT_CARD.LOW]: makeCharacterDef(STAT_CARD.LOW, { cost: 1, power: 1000 }),
+    [STAT_CARD.MID]: makeCharacterDef(STAT_CARD.MID, { cost: 3, power: 3000 }),
+    [STAT_CARD.HIGH]: makeCharacterDef(STAT_CARD.HIGH, { cost: 5, power: 5000 }),
+    // A stand-in for a debuffed character. Status effects are not wired into this
+    // fixture, so the negative value lives on the printed power instead — unreachable
+    // in a real game, but captureSnapshot reports it the same way. Whether a negative
+    // weight should ADD capacity is an unconfirmed ruling (see selection.ts).
+    [STAT_CARD.NEGATIVE]: makeCharacterDef(STAT_CARD.NEGATIVE, { cost: 1, power: -1000 }),
+    [STAT_CARD.NO_COUNTER]: makeCharacterDef(STAT_CARD.NO_COUNTER, { counter: undefined }),
+};
+
+export type CardSpec = { cardId: CardId; zone: Zone; controller?: PlayerId };
+
+export type TargetBoard = {
+    state: GameState;
+    // The effect's own card, on p1's field. Every EvalContext points at it.
+    source: CardInstanceId;
+    // Instance ids in the order their specs were passed, so a test names cards by
+    // position: `const [low, high] = board.ids;`.
+    ids: CardInstanceId[];
+};
+
+// A two-player MAIN-phase board with the source on p1's field plus whatever cards the
+// test lists. Cards go through placeCard, so currentZone and the zone arrays always
+// agree, and the result is checked against the state invariants — a test passing on a
+// board the engine could never produce proves nothing.
+export function makeTargetBoard(cards: CardSpec[] = []): TargetBoard {
+    let state = createTestState(["p1", "p2"], {}, {}, STAT_DEFINITIONS);
+
+    const sourceInstance = makeCharacterInstance({ controller: "p1", cardId: STAT_CARD.SOURCE });
+    state = placeCard(state, sourceInstance, "CHARACTERS");
+
+    const ids: CardInstanceId[] = [];
+    for (const spec of cards) {
+        const instance = makeCharacterInstance({ controller: spec.controller ?? "p1", cardId: spec.cardId });
+        state = placeCard(state, instance, spec.zone);
+        ids.push(instance.instanceId);
+    }
+
+    assertValidGameState(state);
+    return { state, source: sourceInstance.instanceId, ids };
+}
+
+// The standard spread: a cost ladder on each side of the field, plus one card in a
+// zone a field-targeting expression should never reach. Use makeTargetBoard directly
+// when a test needs a specific shape (e.g. a pool with no cost-0 cards).
+export function makeTargetingBoard() {
+    const board = makeTargetBoard([
+        { cardId: STAT_CARD.LOW, zone: "CHARACTERS", controller: "p1" },
+        { cardId: STAT_CARD.MID, zone: "CHARACTERS", controller: "p1" },
+        { cardId: STAT_CARD.LOW, zone: "CHARACTERS", controller: "p2" },
+        { cardId: STAT_CARD.HIGH, zone: "CHARACTERS", controller: "p2" },
+        { cardId: STAT_CARD.MID, zone: "HAND", controller: "p1" },
+    ]);
+    const [selfLow, selfMid, oppLow, oppHigh, selfHand] = board.ids;
+    return { ...board, selfLow, selfMid, oppLow, oppHigh, selfHand };
+}
+
+// The context a resolving effect sourced from `source` would evaluate under.
+export function makeEvalContext(source: CardInstanceId, self: PlayerId = "p1"): EvalContext {
+    return { self, source, subjects: [] };
+}
+
+// Parks an effect on the board's source as currentEffect, cursor 0, nothing stepping
+// it yet. Two uses: isValidSelection reads `selected` off it (pass `selected`), and
+// the prompt loop starts from it (pass `steps`, then call advance).
+export function parkEffect(board: TargetBoard, overrides: Partial<EffectContext> = {}): GameState {
+    const playerId = board.state.instances[board.source].controller;
+    return {
+        ...board.state,
+        currentEffect: makeEffectContext({ playerId, instanceId: board.source, ...overrides }),
+    };
+}
+
+export function selfTarget(): TargetExpression {
+    return { kind: "SELF_TARGET" };
+}
+
+export function selector(zones: Zone[], filter?: CardFilter): TargetExpression {
+    return { kind: "SELECTOR_TARGET", zones, ...(filter ? { filter } : {}) };
+}
+
+export function playerChoice(
+    zones: Zone[],
+    limits: TargetLimit[],
+    opts: { filter?: CardFilter; chooser?: "SELF" | "OPPONENT" } = {},
+): TargetExpression {
+    return {
+        kind: "PLAYER_CHOICE_TARGET",
+        zones,
+        limits,
+        chooser: opts.chooser ?? "SELF",
+        ...(opts.filter ? { filter: opts.filter } : {}),
+    };
+}
+
+// Fresh objects every call: decrementCapacity mutates the limit it is handed, so a
+// limit shared between cases would carry one case's decrements into the next.
+export function cardsLimit(capacity: number, min = 0): TargetLimit {
+    return { kind: "CARDS", min: { kind: "LITERAL", value: min }, capacity: { kind: "LITERAL", value: capacity } };
+}
+
+export function weightedLimit(weight: CardStatType, capacity: number): TargetLimit {
+    return { kind: "WEIGHTED", weight, capacity: { kind: "LITERAL", value: capacity } };
+}
+
+// Reads a LITERAL capacity back out, for asserting on decrementCapacity's result.
+export function capacityOf(limit: TargetLimit): number {
+    if (limit.capacity.kind !== "LITERAL") throw new Error(`capacityOf only reads LITERAL capacities`);
+    return limit.capacity.value;
+}
+
+// A RESOLUTION step that only carries a target expression. REST is used because it is
+// the one targeted operation that does not throw once selection finishes.
+export function makeTargetedStep(target: TargetExpression): EffectStep {
+    return { kind: "RESOLUTION", operation: { type: "REST", target } };
+}
+
+// Target order follows playerZones key order and zone order, which is an
+// implementation detail. Compare id lists through this, never as raw arrays.
+export function sortedIds(ids: CardInstanceId[]): CardInstanceId[] {
+    return [...ids].sort();
+}
+
+export const CONTROLLED_BY_SELF: CardFilter = { kind: "CONTROLLER", controller: "SELF" };
+export const CONTROLLED_BY_OPPONENT: CardFilter = { kind: "CONTROLLER", controller: "OPPONENT" };
